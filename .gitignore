@@ -1,0 +1,41 @@
+# Build artifacts
+# Build artifacts
+rec-watch
+rec-watch.exe
+/build/
+/dist/
+/bin/
+
+# Program output
+# The default output directory for converted videos is 'out'
+/out/
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+.vscode/
+.idea/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Test directories
+test_watch/
+test_input/
