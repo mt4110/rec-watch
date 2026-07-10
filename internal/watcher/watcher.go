@@ -180,22 +180,14 @@ func (w *Watcher) shouldProcess(fName string) bool {
 }
 
 func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, processing map[string]bool) {
-	keepProcessing := false
 	defer func() {
-		if keepProcessing {
-			return
-		}
 		processingMu.Lock()
 		delete(processing, path)
 		processingMu.Unlock()
 	}()
 
-	baseOut, _ := filepath.Abs(w.Cfg.DestDir)
-	batchDir := baseOut
-	if w.Cfg.BatchStamp {
-		batchDir = filepath.Join(baseOut, nowStamp())
-	}
-	if err := os.MkdirAll(batchDir, 0755); err != nil {
+	batchDir, err := w.prepareBatchDir()
+	if err != nil {
 		log.Printf("出力ディレクトリ作成失敗: %v", err)
 		return
 	}
@@ -215,30 +207,17 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 	}
 
 	log.Printf("変換開始: %s", absPath)
-	if _, err := fileguard.WaitUntilStable(context.Background(), absPath, fileguard.StabilityOptions{
-		Timeout:       w.Cfg.StableTimeout,
-		Interval:      w.Cfg.StableInterval,
-		StableSamples: w.Cfg.StableSamples,
-	}); err != nil {
+	if err := w.waitForStableFile(absPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			log.Printf("安定化待ち中に監視対象が消えたためスキップ: %s", absPath)
 			return
 		}
-		if shouldRetryStabilityWait(err) {
-			log.Printf("ファイルの安定化がタイムアウトしたため再試行します: %s", absPath)
-			keepProcessing = true
-			time.AfterFunc(w.retryDelay(), func() {
-				w.processFile(path, name, processingMu, processing)
-			})
-			return
+		if errors.Is(err, fileguard.ErrStabilityTimeout) {
+			log.Printf("ファイルの安定化がタイムアウトしました: %s", absPath)
+		} else {
+			log.Printf("ファイルの安定化待ちに失敗: %v", err)
 		}
-		log.Printf("ファイルの安定化待ちに失敗: %v", err)
-		if w.EventChan != nil {
-			w.EventChan <- FailureEvent{Path: absPath, Err: err}
-		}
-		if w.Cfg.Notify {
-			convert.SendNotification("変換失敗", fmt.Sprintf("%s の準備に失敗しました。", name), "")
-		}
+		w.reportFailure(absPath, name, "準備", err)
 		return
 	}
 
@@ -248,12 +227,7 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 
 	if result, err := w.Converter.Convert(absPath, batchDir); err != nil {
 		log.Printf("❌ 変換失敗: %v", err)
-		if w.EventChan != nil {
-			w.EventChan <- FailureEvent{Path: absPath, Err: err}
-		}
-		if w.Cfg.Notify {
-			convert.SendNotification("変換失敗", fmt.Sprintf("%s の変換に失敗しました。", name), "")
-		}
+		w.reportFailure(absPath, name, "変換", err)
 	} else {
 		if !w.Cfg.DryRun {
 			if err := history.WriteConversionResult(result); err != nil {
@@ -276,15 +250,34 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 	}
 }
 
-func shouldRetryStabilityWait(err error) bool {
-	return errors.Is(err, fileguard.ErrStabilityTimeout) && !errors.Is(err, os.ErrNotExist)
+func (w *Watcher) prepareBatchDir() (string, error) {
+	baseOut, _ := filepath.Abs(w.Cfg.DestDir)
+	batchDir := baseOut
+	if w.Cfg.BatchStamp {
+		batchDir = filepath.Join(baseOut, nowStamp())
+	}
+	if err := os.MkdirAll(batchDir, 0755); err != nil {
+		return "", err
+	}
+	return batchDir, nil
 }
 
-func (w *Watcher) retryDelay() time.Duration {
-	if w.Cfg.StableInterval > 0 {
-		return w.Cfg.StableInterval
+func (w *Watcher) waitForStableFile(path string) error {
+	_, err := fileguard.WaitUntilStable(context.Background(), path, fileguard.StabilityOptions{
+		Timeout:       w.Cfg.StableTimeout,
+		Interval:      w.Cfg.StableInterval,
+		StableSamples: w.Cfg.StableSamples,
+	})
+	return err
+}
+
+func (w *Watcher) reportFailure(path, name, stage string, err error) {
+	if w.EventChan != nil {
+		w.EventChan <- FailureEvent{Path: path, Err: err}
 	}
-	return time.Second
+	if w.Cfg.Notify {
+		convert.SendNotification("変換失敗", fmt.Sprintf("%s の%sに失敗しました。", name, stage), "")
+	}
 }
 
 func nowStamp() string {

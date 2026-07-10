@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,4 +40,41 @@ func TestCollectStatsAggregatesAndDeduplicatesSources(t *testing.T) {
 	if len(usedPaths) != 2 {
 		t.Fatalf("usedPaths = %v, want 2 paths", usedPaths)
 	}
+}
+
+func TestCollectStatsFromReaderReturnsScannerError(t *testing.T) {
+	seen := map[string]struct{}{}
+	line := `{"type":"conversion_result","input":"a.mov","output":"a.mp4","duration_sec":2,"original_size":100,"converted_size":40,"size_diff":60,"timestamp":"2026-07-10T00:00:00Z"}` + "\n"
+
+	count, diff, duration, err := collectStatsFromReader(&errorReader{
+		data: []byte(line),
+		err:  io.ErrUnexpectedEOF,
+	}, seen)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err = %v, want %v", err, io.ErrUnexpectedEOF)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+	if diff != 60 {
+		t.Fatalf("diff = %d, want 60", diff)
+	}
+	if duration != 2 {
+		t.Fatalf("duration = %v, want 2", duration)
+	}
+}
+
+type errorReader struct {
+	data []byte
+	err  error
+	read bool
+}
+
+func (r *errorReader) Read(p []byte) (int, error) {
+	if r.read {
+		return 0, r.err
+	}
+	r.read = true
+	n := copy(p, r.data)
+	return n, nil
 }

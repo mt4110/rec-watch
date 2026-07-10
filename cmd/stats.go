@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -87,20 +88,12 @@ func collectStats(paths []string) (int, int64, float64, []string, error) {
 		}
 
 		usedPaths = append(usedPaths, path)
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			entry, ok := parseLogEntry(scanner.Text())
-			if !ok || entry.Type != "conversion_result" {
-				continue
-			}
-			key := statsEntryKey(entry)
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			totalCount++
-			totalDiff += entry.SizeDiff
-			totalDuration += entry.DurationSec
+		count, diff, duration, scanErr := collectStatsFromReader(f, seen)
+		totalCount += count
+		totalDiff += diff
+		totalDuration += duration
+		if scanErr != nil && lastErr == nil {
+			lastErr = scanErr
 		}
 		if err := f.Close(); err != nil && lastErr == nil {
 			lastErr = err
@@ -112,6 +105,31 @@ func collectStats(paths []string) (int, int64, float64, []string, error) {
 	}
 
 	return totalCount, totalDiff, totalDuration, usedPaths, nil
+}
+
+func collectStatsFromReader(r io.Reader, seen map[string]struct{}) (int, int64, float64, error) {
+	scanner := bufio.NewScanner(r)
+
+	var totalCount int
+	var totalDiff int64
+	var totalDuration float64
+
+	for scanner.Scan() {
+		entry, ok := parseLogEntry(scanner.Text())
+		if !ok || entry.Type != "conversion_result" {
+			continue
+		}
+		key := statsEntryKey(entry)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		totalCount++
+		totalDiff += entry.SizeDiff
+		totalDuration += entry.DurationSec
+	}
+
+	return totalCount, totalDiff, totalDuration, scanner.Err()
 }
 
 func parseLogEntry(line string) (LogEntry, bool) {

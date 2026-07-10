@@ -107,35 +107,3 @@ func TestStabilityTimeoutIsRetriable(t *testing.T) {
 		t.Fatal("expected ErrStabilityTimeout to be detectable")
 	}
 }
-
-func TestShouldRetryStabilityWait(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "timeout only",
-			err:  fmt.Errorf("wrapped: %w", fileguard.ErrStabilityTimeout),
-			want: true,
-		},
-		{
-			name: "missing file only",
-			err:  fmt.Errorf("wrapped: %w", os.ErrNotExist),
-			want: false,
-		},
-		{
-			name: "timeout and missing file",
-			err:  fmt.Errorf("%w: %w", fileguard.ErrStabilityTimeout, os.ErrNotExist),
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldRetryStabilityWait(tt.err); got != tt.want {
-				t.Fatalf("shouldRetryStabilityWait(%v) = %v, want %v", tt.err, got, tt.want)
-			}
-		})
-	}
-}
