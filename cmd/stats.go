@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mt4110/rec-watch/internal/history"
 )
 
 type LogEntry struct {
@@ -31,17 +33,20 @@ var statsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		home, _ := os.UserHomeDir()
 
-		// Determine log file path (attempt to respect config if loaded, but here we might just check standard path)
-		// Since root command loads config, we might access cfg global if we exported it or if we move this logical
-		// but simple path: default location
+		historyPath, _ := history.DefaultPath()
 		logPath := filepath.Join(home, "Library/Logs/rec-watch.log")
 		if cfg != nil && cfg.LogFile != "" {
 			logPath = cfg.LogFile
 		}
 
-		f, err := os.Open(logPath)
+		statsPath := historyPath
+		if _, err := os.Stat(statsPath); err != nil {
+			statsPath = logPath
+		}
+
+		f, err := os.Open(statsPath)
 		if err != nil {
-			log.Fatalf("ログファイルを開けませんでした: %v", err)
+			log.Fatalf("履歴ファイルを開けませんでした: %v", err)
 		}
 		defer f.Close()
 

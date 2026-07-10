@@ -14,6 +14,12 @@ func TestNewDefault(t *testing.T) {
 	if cfg.Notify != true {
 		t.Errorf("expected notify default true, got %v", cfg.Notify)
 	}
+	if cfg.SourcePolicy != "trash" {
+		t.Errorf("expected source policy trash, got %s", cfg.SourcePolicy)
+	}
+	if cfg.StableSamples != 3 {
+		t.Errorf("expected stable samples 3, got %d", cfg.StableSamples)
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {

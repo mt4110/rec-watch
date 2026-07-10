@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -13,6 +14,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/mt4110/rec-watch/internal/config"
 	"github.com/mt4110/rec-watch/internal/convert"
+	"github.com/mt4110/rec-watch/internal/fileguard"
+	"github.com/mt4110/rec-watch/internal/history"
+	"github.com/mt4110/rec-watch/internal/postprocess"
+	"github.com/mt4110/rec-watch/internal/prompt"
 )
 
 type Watcher struct {
@@ -96,22 +101,6 @@ func (w *Watcher) handleEvent(event fsnotify.Event, processingMu *sync.Mutex, pr
 		return
 	}
 
-	log.Printf("新規ファイルを検知: %s", event.Name)
-
-	if w.EventChan != nil {
-		// Emit Found Event
-		// Use anonymous struct or map to avoid dep?
-		// Or define Types in watcher pkg
-		w.EventChan <- FileFoundEvent{Path: event.Name, Name: fName}
-	}
-
-	time.Sleep(2 * time.Second) // Wait for write finish (simple)
-
-	if _, err := os.Stat(event.Name); os.IsNotExist(err) {
-		log.Printf("ファイルが見つかりません (削除または移動されました): %s", event.Name)
-		return
-	}
-
 	processingMu.Lock()
 	if processing[event.Name] {
 		processingMu.Unlock()
@@ -120,6 +109,15 @@ func (w *Watcher) handleEvent(event fsnotify.Event, processingMu *sync.Mutex, pr
 	}
 	processing[event.Name] = true
 	processingMu.Unlock()
+
+	log.Printf("新規ファイルを検知: %s", event.Name)
+
+	if w.EventChan != nil {
+		// Emit Found Event
+		// Use anonymous struct or map to avoid dep?
+		// Or define Types in watcher pkg
+		w.EventChan <- FileFoundEvent{Path: event.Name, Name: fName}
+	}
 
 	go w.processFile(event.Name, fName, processingMu, processing)
 }
@@ -204,11 +202,26 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 	}
 
 	log.Printf("変換開始: %s", absPath)
+	if _, err := fileguard.WaitUntilStable(context.Background(), absPath, fileguard.StabilityOptions{
+		Timeout:       w.Cfg.StableTimeout,
+		Interval:      w.Cfg.StableInterval,
+		StableSamples: w.Cfg.StableSamples,
+	}); err != nil {
+		log.Printf("ファイルの安定化待ちに失敗: %v", err)
+		if w.EventChan != nil {
+			w.EventChan <- FailureEvent{Path: absPath, Err: err}
+		}
+		if w.Cfg.Notify {
+			convert.SendNotification("変換失敗", fmt.Sprintf("%s の準備に失敗しました。", name), "")
+		}
+		return
+	}
+
 	if w.EventChan != nil {
 		w.EventChan <- StartConvertEvent{Path: absPath}
 	}
 
-	if outPath, err := w.Converter.Convert(absPath, batchDir); err != nil {
+	if result, err := w.Converter.Convert(absPath, batchDir); err != nil {
 		log.Printf("❌ 変換失敗: %v", err)
 		if w.EventChan != nil {
 			w.EventChan <- FailureEvent{Path: absPath, Err: err}
@@ -217,12 +230,23 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 			convert.SendNotification("変換失敗", fmt.Sprintf("%s の変換に失敗しました。", name), "")
 		}
 	} else {
+		if !w.Cfg.DryRun {
+			if err := history.WriteConversionResult(result); err != nil {
+				log.Printf("履歴の書き込みに失敗: %v", err)
+			}
+			decision, err := postprocess.HandleSource(context.Background(), postprocess.SourcePolicy(w.Cfg.SourcePolicy), result, prompt.NewSourcePrompter())
+			if err != nil {
+				log.Printf("変換元ファイルの処理に失敗: %v", err)
+			} else {
+				log.Printf("変換元ファイルの処理: %s", decision)
+			}
+		}
 		log.Printf("✅ 変換完了: %s", path)
 		if w.EventChan != nil {
-			w.EventChan <- SuccessEvent{Path: path, OutPath: outPath}
+			w.EventChan <- SuccessEvent{Path: path, OutPath: result.OutputPath}
 		}
 		if w.Cfg.Notify {
-			convert.SendNotification("変換完了", fmt.Sprintf("%s を変換しました。", name), outPath)
+			convert.SendNotification("変換完了", fmt.Sprintf("%s を変換しました。", name), result.OutputPath)
 		}
 	}
 }

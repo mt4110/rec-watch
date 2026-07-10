@@ -13,8 +13,10 @@
     -   **クリックで再生**: 通知をクリックすると、変換されたMP4ファイルがデフォルトのプレイヤー（QuickTime Playerなど）で即座に開きます。
 -   **スマートな変換**:
     -   アスペクト比を維持しつつ1080pにリサイズ＆黒帯追加（パディング）。
-    -   変換元のファイルは自動でゴミ箱へ（設定で変更可能）。
+    -   変換元のファイルは `--source-policy` で `keep` / `trash` / `ask` から選択できます。
+    -   変換後ファイルが存在しない、0バイト、または元ファイルより大きい場合は、元ファイルをゴミ箱へ移動しません。
     -   **ファイル名自動整理**: 録画日時（`YYYY-MM-DD_HH-MM-SS.mp4`）に自動リネーム。
+-   **安定化待ち**: 監視モードでは、作成直後のファイルにすぐ触らず、サイズと更新日時が連続して安定するまで待ってから変換します。
 -   **高速処理**: CPUコア数に応じた並列処理で、大量のファイルもサクサク変換。
 
 ## セキュリティとプライバシー
@@ -23,6 +25,7 @@ RecWatchは、ユーザーのプライバシーとセキュリティを第一に
 
 -   **完全ローカル動作**: すべての処理はご自身のMac内（ローカル）で完結します。動画データやログが外部サーバーに送信されることは一切ありません。
 -   **安全なファイル削除**: 変換後の元ファイルは「削除（rm）」ではなく「ゴミ箱への移動」を行います。万が一の場合でも、ゴミ箱から簡単に復元可能です。
+-   **削除前の安全判定**: 変換が成功し、出力ファイルが存在し、変換後サイズが元ファイルより小さい場合だけ、元ファイルをゴミ箱へ移動できます。
 -   **オープンソース**: ソースコードは全て公開されており、不審な挙動がないことを誰でも確認できます。
 
 ## インストール
@@ -62,6 +65,32 @@ mkdir -p ~/Desktop/ScreenRecordings-out ~/Desktop/ScreenRecordings
 ```
 ![DEMO](./docs/demo.gif)
 
+監視モードでは、録画アプリやESETなどのリアルタイム保護、クラウド同期が作成直後のファイルを触っている可能性があります。RecWatchは固定秒数で待つのではなく、ファイルサイズと更新日時が安定したことを確認してから変換します。
+
+```bash
+rec-watch --watch ~/Desktop/ScreenRecordings \
+  --stable-timeout 120s \
+  --stable-interval 1s \
+  --stable-samples 3
+```
+
+### 変換元ファイルの扱い
+
+デフォルトは `--source-policy trash` です。ただし、変換後ファイルが0バイト、元ファイル以上のサイズ、または存在しない場合は、元ファイルを残します。
+
+```bash
+# 元ファイルを必ず残す
+rec-watch ~/Movies/ScreenRecordings --source-policy keep
+
+# 安全条件を満たした場合だけゴミ箱へ移動
+rec-watch ~/Movies/ScreenRecordings --source-policy trash
+
+# 変換後に削減量を見て確認する
+rec-watch ~/Movies/ScreenRecordings --source-policy ask
+
+# 後方互換: --source-policy keep と同じ
+rec-watch ~/Movies/ScreenRecordings --no-trash
+```
 
 ### 一括変換モード
 カレントディレクトリ、または指定したディレクトリ以下の動画ファイルを一括変換します。
@@ -94,9 +123,15 @@ Flags:
       --parallel-split            動画を分割して並列変換する（大容量ファイル向け・爆速）
       --preset string             エンコードプリセット (default "faster")
       --profile string            使用するプロファイル名
+      --source-policy string      変換元ファイルの扱い (keep, trash, ask)
       --stamp-per-file            個別のファイル名にタイムスタンプを追加する
+      --stable-interval duration  監視時にファイルサイズと更新日時を確認する間隔 (default 1s)
+      --stable-samples int        安定判定に必要な連続サンプル数 (default 3)
+      --stable-timeout duration   監視時にファイル安定化を待つ最大時間 (default 120s)
       --watch                     指定したディレクトリを監視して自動変換する
 ```
+
+変換履歴は成功時に `~/Library/Application Support/RecWatch/history.jsonl` へJSONL形式で保存されます。`rec-watch stats` はこの履歴を優先して集計します。
 
 ---
 
@@ -167,6 +202,5 @@ TUIモードの操作方法や、GPU/並列変換モードの詳しい仕様に�
 
 ## 関連、親和性があるリポジトリ
  [readme-gif-crafter](https://github.com/mt4110#:~:text=1-,readme%2Dgif%2Dcrafter,-Public)
-
 
 
