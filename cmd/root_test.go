@@ -30,3 +30,29 @@ func TestUpdateConfigFromFlagsNoTrashForcesKeep(t *testing.T) {
 		t.Fatalf("SourcePolicy = %q, want %q", cfg.SourcePolicy, "keep")
 	}
 }
+
+func TestUpdateConfigFromFlagsSourcePolicyOverridesLegacyNoTrashConfig(t *testing.T) {
+	command := &cobra.Command{}
+	command.Flags().Bool("no-trash", false, "")
+	command.Flags().String("source-policy", "trash", "")
+
+	if err := command.Flags().Set("source-policy", "ask"); err != nil {
+		t.Fatal(err)
+	}
+
+	flagNoTrash = false
+	flagSourcePolicy = "ask"
+
+	cfg := config.NewDefault()
+	cfg.NoTrash = true
+	cfg.SourcePolicy = "keep"
+
+	updateConfigFromFlags(command, cfg)
+
+	if cfg.SourcePolicy != "ask" {
+		t.Fatalf("SourcePolicy = %q, want %q", cfg.SourcePolicy, "ask")
+	}
+	if cfg.NoTrash {
+		t.Fatal("NoTrash = true, want false")
+	}
+}

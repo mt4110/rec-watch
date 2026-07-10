@@ -292,8 +292,12 @@ func escapeConcatPath(path string) string {
 	escaped := make([]byte, 0, len(path))
 	for i := 0; i < len(path); i++ {
 		switch c := path[i]; c {
-		case '\\', '\'', '\n', '\r':
+		case '\\', '\'':
 			escaped = append(escaped, '\\', c)
+		case '\n':
+			escaped = append(escaped, '\\', 'n')
+		case '\r':
+			escaped = append(escaped, '\\', 'r')
 		default:
 			escaped = append(escaped, c)
 		}

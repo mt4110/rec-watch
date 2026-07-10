@@ -85,7 +85,7 @@ rec-watch ~/Movies/ScreenRecordings --source-policy keep
 # 安全条件を満たした場合だけゴミ箱へ移動
 rec-watch ~/Movies/ScreenRecordings --source-policy trash
 
-# 変換後に削減量を見て確認する
+# 変換後に削減量を見て確認する (macOS ではダイアログ、その他のOSでは keep)
 rec-watch ~/Movies/ScreenRecordings --source-policy ask
 
 # 後方互換: --source-policy keep と同じ
@@ -131,7 +131,7 @@ Flags:
       --watch                     指定したディレクトリを監視して自動変換する
 ```
 
-変換履歴は成功時に `~/Library/Application Support/RecWatch/history.jsonl` へJSONL形式で保存されます。`rec-watch stats` はこの履歴を優先して集計します。
+変換履歴は成功時にOS標準の設定ディレクトリ配下の `RecWatch/history.jsonl` へJSONL形式で保存されます。`rec-watch stats` はこの履歴と従来のログを両方集計します。
 
 ---
 
@@ -202,5 +202,4 @@ TUIモードの操作方法や、GPU/並列変換モードの詳しい仕様に�
 
 ## 関連、親和性があるリポジトリ
  [readme-gif-crafter](https://github.com/mt4110#:~:text=1-,readme%2Dgif%2Dcrafter,-Public)
-
 

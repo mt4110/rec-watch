@@ -288,14 +288,17 @@ func updateConfigFromFlags(cmd *cobra.Command, c *config.Config) {
 		c.NoTrash = flagNoTrash
 		if flagNoTrash {
 			c.SourcePolicy = "keep"
-		} else {
+		} else if !flags.Changed("source-policy") {
 			c.SourcePolicy = "trash"
 		}
 	}
 	if flags.Changed("source-policy") {
 		c.SourcePolicy = flagSourcePolicy
+		if !flags.Changed("no-trash") {
+			c.NoTrash = false
+		}
 	}
-	if c.NoTrash {
+	if flags.Changed("no-trash") && c.NoTrash {
 		c.SourcePolicy = "keep"
 	}
 	if flags.Changed("batch-stamp") {

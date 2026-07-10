@@ -32,50 +32,20 @@ var statsCmd = &cobra.Command{
 	Long:  `過去の変換履歴(ログファイル)を集計し、削減されたファイルサイズや変換時間を表示します。`,
 	Run: func(cmd *cobra.Command, args []string) {
 		home, _ := os.UserHomeDir()
-
-		historyPath, _ := history.DefaultPath()
-		logPath := filepath.Join(home, "Library/Logs/rec-watch.log")
+		logPath := filepath.Join(home, "Library", "Logs", "rec-watch.log")
 		if cfg != nil && cfg.LogFile != "" {
 			logPath = cfg.LogFile
 		}
 
-		statsPath := historyPath
-		if _, err := os.Stat(statsPath); err != nil {
-			statsPath = logPath
+		sourcePaths := []string{logPath}
+		historyPath, err := history.DefaultPath()
+		if err == nil {
+			sourcePaths = append([]string{historyPath}, sourcePaths...)
 		}
 
-		f, err := os.Open(statsPath)
+		totalCount, totalDiff, totalDuration, usedPaths, err := collectStats(sourcePaths)
 		if err != nil {
-			log.Fatalf("履歴ファイルを開けませんでした: %v", err)
-		}
-		defer f.Close()
-
-		var totalDiff int64
-		var totalCount int
-		var totalDuration float64
-
-		// For verification output mostly
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// Log lines usually start with date/time "2023/01/01 10:00:00 filename.go:10: {"type":...}"
-			// We need to find the start of JSON.
-			idx := strings.Index(line, "{")
-			if idx == -1 {
-				continue
-			}
-			jsonPart := line[idx:]
-
-			var entry LogEntry
-			if err := json.Unmarshal([]byte(jsonPart), &entry); err != nil {
-				continue
-			}
-
-			if entry.Type == "conversion_result" {
-				totalCount++
-				totalDiff += entry.SizeDiff
-				totalDuration += entry.DurationSec
-			}
+			log.Fatalf("統計ソースを開けませんでした (%s): %v", strings.Join(sourcePaths, ", "), err)
 		}
 
 		const separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -88,8 +58,83 @@ var statsCmd = &cobra.Command{
 		if totalCount > 0 {
 			fmt.Printf("平均削減率:     %.1f MB/本\n", float64(totalDiff)/float64(totalCount)/1024/1024)
 		}
+		if len(usedPaths) > 0 {
+			fmt.Printf("集計ソース:     %s\n", strings.Join(usedPaths, ", "))
+		}
 		fmt.Println(separator)
 	},
+}
+
+func collectStats(paths []string) (int, int64, float64, []string, error) {
+	seen := map[string]struct{}{}
+	var totalCount int
+	var totalDiff int64
+	var totalDuration float64
+	var usedPaths []string
+	var lastErr error
+
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			lastErr = err
+			continue
+		}
+
+		usedPaths = append(usedPaths, path)
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			entry, ok := parseLogEntry(scanner.Text())
+			if !ok || entry.Type != "conversion_result" {
+				continue
+			}
+			key := statsEntryKey(entry)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			totalCount++
+			totalDiff += entry.SizeDiff
+			totalDuration += entry.DurationSec
+		}
+		if err := f.Close(); err != nil && lastErr == nil {
+			lastErr = err
+		}
+	}
+
+	if len(usedPaths) == 0 && lastErr != nil {
+		return 0, 0, 0, nil, lastErr
+	}
+
+	return totalCount, totalDiff, totalDuration, usedPaths, nil
+}
+
+func parseLogEntry(line string) (LogEntry, bool) {
+	idx := strings.Index(line, "{")
+	if idx == -1 {
+		return LogEntry{}, false
+	}
+
+	var entry LogEntry
+	if err := json.Unmarshal([]byte(line[idx:]), &entry); err != nil {
+		return LogEntry{}, false
+	}
+	return entry, true
+}
+
+func statsEntryKey(entry LogEntry) string {
+	return strings.Join([]string{
+		entry.Timestamp,
+		entry.Input,
+		entry.Output,
+		fmt.Sprintf("%.6f", entry.DurationSec),
+		fmt.Sprintf("%d", entry.SizeDiff),
+	}, "|")
 }
 
 func formatBytes(b int64) string {
