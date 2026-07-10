@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -200,6 +201,14 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 		log.Printf("パスの解決に失敗: %v", err)
 		return
 	}
+	if _, err := os.Stat(absPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			log.Printf("監視対象が見つからないためスキップ: %s", absPath)
+			return
+		}
+		log.Printf("ファイル確認に失敗: %v", err)
+		return
+	}
 
 	log.Printf("変換開始: %s", absPath)
 	if _, err := fileguard.WaitUntilStable(context.Background(), absPath, fileguard.StabilityOptions{
@@ -207,6 +216,10 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 		Interval:      w.Cfg.StableInterval,
 		StableSamples: w.Cfg.StableSamples,
 	}); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			log.Printf("安定化待ち中に監視対象が消えたためスキップ: %s", absPath)
+			return
+		}
 		log.Printf("ファイルの安定化待ちに失敗: %v", err)
 		if w.EventChan != nil {
 			w.EventChan <- FailureEvent{Path: absPath, Err: err}

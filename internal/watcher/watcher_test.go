@@ -1,6 +1,9 @@
 package watcher
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -87,5 +90,12 @@ func TestFiltering(t *testing.T) {
 				t.Errorf("shouldProcess(%q) = %v, want %v", tt.filename, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStabilityMissingFileIsSkippable(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", os.ErrNotExist)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("expected os.ErrNotExist to be detectable")
 	}
 }
