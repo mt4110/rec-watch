@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -273,18 +274,20 @@ func writeConcatList(tmpDir string, chunks []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
 	for _, chunk := range chunks {
 		abs, err := filepath.Abs(chunk)
 		if err != nil {
-			return "", err
+			return "", errors.Join(err, f.Close())
 		}
 		if _, err := f.WriteString(fmt.Sprintf("file '%s'\n", escapeConcatPath(abs))); err != nil {
-			return "", err
+			return "", errors.Join(err, f.Close())
 		}
 	}
 
+	if err := f.Close(); err != nil {
+		return "", err
+	}
 	return listFile, nil
 }
 

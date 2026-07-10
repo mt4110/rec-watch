@@ -64,6 +64,31 @@ func TestCollectStatsFromReaderReturnsScannerError(t *testing.T) {
 	}
 }
 
+func TestCollectStatsReturnsErrorWhenAnyUsedSourceFails(t *testing.T) {
+	dir := t.TempDir()
+	historyPath := filepath.Join(dir, "history.jsonl")
+	logPath := filepath.Join(dir, "rec-watch.log")
+
+	line := `{"type":"conversion_result","input":"a.mov","output":"a.mp4","duration_sec":2,"original_size":100,"converted_size":40,"size_diff":60,"timestamp":"2026-07-10T00:00:00Z"}`
+	if err := os.Mkdir(historyPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte(line+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	count, _, _, usedPaths, err := collectStats([]string{historyPath, logPath})
+	if err == nil {
+		t.Fatal("expected an error when one configured stats source cannot be read")
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want readable source to be counted before error is returned", count)
+	}
+	if len(usedPaths) != 2 || usedPaths[0] != historyPath || usedPaths[1] != logPath {
+		t.Fatalf("usedPaths = %v, want [%s %s]", usedPaths, historyPath, logPath)
+	}
+}
+
 type errorReader struct {
 	data []byte
 	err  error

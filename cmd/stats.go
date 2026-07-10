@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -42,11 +43,13 @@ var statsCmd = &cobra.Command{
 		historyPath, err := history.DefaultPath()
 		if err == nil {
 			sourcePaths = append([]string{historyPath}, sourcePaths...)
+		} else {
+			log.Fatalf("履歴ファイルの場所を解決できませんでした: %v", err)
 		}
 
 		totalCount, totalDiff, totalDuration, usedPaths, err := collectStats(sourcePaths)
 		if err != nil {
-			log.Fatalf("統計ソースを開けませんでした (%s): %v", strings.Join(sourcePaths, ", "), err)
+			log.Fatalf("統計ソースの読み取りに失敗しました (%s): %v", strings.Join(sourcePaths, ", "), err)
 		}
 
 		const separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -83,7 +86,7 @@ func collectStats(paths []string) (int, int64, float64, []string, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			lastErr = err
+			lastErr = errors.Join(lastErr, fmt.Errorf("open stats source %s: %w", path, err))
 			continue
 		}
 
@@ -92,16 +95,16 @@ func collectStats(paths []string) (int, int64, float64, []string, error) {
 		totalCount += count
 		totalDiff += diff
 		totalDuration += duration
-		if scanErr != nil && lastErr == nil {
-			lastErr = scanErr
+		if scanErr != nil {
+			lastErr = errors.Join(lastErr, fmt.Errorf("scan stats source %s: %w", path, scanErr))
 		}
-		if err := f.Close(); err != nil && lastErr == nil {
-			lastErr = err
+		if err := f.Close(); err != nil {
+			lastErr = errors.Join(lastErr, fmt.Errorf("close stats source %s: %w", path, err))
 		}
 	}
 
-	if len(usedPaths) == 0 && lastErr != nil {
-		return 0, 0, 0, nil, lastErr
+	if lastErr != nil {
+		return totalCount, totalDiff, totalDuration, usedPaths, lastErr
 	}
 
 	return totalCount, totalDiff, totalDuration, usedPaths, nil

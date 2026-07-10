@@ -40,15 +40,6 @@ func WriteConversionResult(result convert.ConvertResult) error {
 }
 
 func WriteConversionResultTo(path string, result convert.ConvertResult) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
 	entry := Entry{
 		Type:          "conversion_result",
 		Input:         result.InputPath,
@@ -65,8 +56,19 @@ func WriteConversionResultTo(path string, result convert.ConvertResult) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write history: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close history: %w", err)
 	}
 	return nil
 }
