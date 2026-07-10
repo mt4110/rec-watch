@@ -61,7 +61,11 @@ func TestDefaultPathUsesUserConfigDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := filepath.Join(tempDir, "Library", "Application Support", "RecWatch", "history.jsonl")
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(configDir, "RecWatch", "history.jsonl")
 	if path != want {
 		t.Fatalf("DefaultPath() = %q, want %q", path, want)
 	}
