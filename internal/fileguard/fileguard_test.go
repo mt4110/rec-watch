@@ -2,6 +2,7 @@ package fileguard
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,6 +43,9 @@ func TestWaitUntilStableMissingFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for missing file")
+	}
+	if !errors.Is(err, ErrStabilityTimeout) {
+		t.Fatalf("expected ErrStabilityTimeout, got %v", err)
 	}
 }
 

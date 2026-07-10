@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mt4110/rec-watch/internal/config"
+	"github.com/mt4110/rec-watch/internal/fileguard"
 )
 
 // Helper to test filtering logic without running the actual watcher loop
@@ -97,5 +98,12 @@ func TestStabilityMissingFileIsSkippable(t *testing.T) {
 	err := fmt.Errorf("wrapped: %w", os.ErrNotExist)
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("expected os.ErrNotExist to be detectable")
+	}
+}
+
+func TestStabilityTimeoutIsRetriable(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", fileguard.ErrStabilityTimeout)
+	if !errors.Is(err, fileguard.ErrStabilityTimeout) {
+		t.Fatal("expected ErrStabilityTimeout to be detectable")
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var ErrStabilityTimeout = errors.New("file stability timeout")
+
 type StabilityOptions struct {
 	Timeout       time.Duration
 	Interval      time.Duration
@@ -65,9 +67,9 @@ func WaitUntilStable(ctx context.Context, path string, opt StabilityOptions) (St
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				if lastErr != nil {
-					return StabilityResult{Path: path, SampleCount: sampleCount}, fmt.Errorf("file did not become stable before timeout: %w", lastErr)
+					return StabilityResult{Path: path, SampleCount: sampleCount}, fmt.Errorf("%w: %w", ErrStabilityTimeout, lastErr)
 				}
-				return StabilityResult{Path: path, SampleCount: sampleCount}, fmt.Errorf("file did not become stable before timeout")
+				return StabilityResult{Path: path, SampleCount: sampleCount}, ErrStabilityTimeout
 			}
 			return StabilityResult{Path: path, SampleCount: sampleCount}, ctx.Err()
 		case <-ticker.C:

@@ -180,7 +180,11 @@ func (w *Watcher) shouldProcess(fName string) bool {
 }
 
 func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, processing map[string]bool) {
+	keepProcessing := false
 	defer func() {
+		if keepProcessing {
+			return
+		}
 		processingMu.Lock()
 		delete(processing, path)
 		processingMu.Unlock()
@@ -216,6 +220,14 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 		Interval:      w.Cfg.StableInterval,
 		StableSamples: w.Cfg.StableSamples,
 	}); err != nil {
+		if errors.Is(err, fileguard.ErrStabilityTimeout) {
+			log.Printf("ファイルの安定化がタイムアウトしたため再試行します: %s", absPath)
+			keepProcessing = true
+			time.AfterFunc(w.retryDelay(), func() {
+				w.processFile(path, name, processingMu, processing)
+			})
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			log.Printf("安定化待ち中に監視対象が消えたためスキップ: %s", absPath)
 			return
@@ -262,6 +274,13 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 			convert.SendNotification("変換完了", fmt.Sprintf("%s を変換しました。", name), result.OutputPath)
 		}
 	}
+}
+
+func (w *Watcher) retryDelay() time.Duration {
+	if w.Cfg.StableInterval > 0 {
+		return w.Cfg.StableInterval
+	}
+	return time.Second
 }
 
 func nowStamp() string {
