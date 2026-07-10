@@ -51,3 +51,18 @@ func TestWriteConversionResultTo(t *testing.T) {
 		t.Fatalf("SizeDiff = %d, want 60", entry.SizeDiff)
 	}
 }
+
+func TestDefaultPathUsesUserConfigDir(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOME", tempDir)
+
+	path, err := DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(tempDir, "Library", "Application Support", "RecWatch", "history.jsonl")
+	if path != want {
+		t.Fatalf("DefaultPath() = %q, want %q", path, want)
+	}
+}

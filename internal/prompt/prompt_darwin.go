@@ -17,6 +17,9 @@ func NewSourcePrompter() SourcePrompter {
 }
 
 func (SourcePrompter) AskSourceDecision(req postprocess.SourceDecisionRequest) (postprocess.Decision, error) {
+	askMu.Lock()
+	defer askMu.Unlock()
+
 	savedPercent := 0.0
 	if req.OriginalSize > 0 {
 		savedPercent = float64(req.SizeDiff) / float64(req.OriginalSize) * 100

@@ -280,12 +280,25 @@ func writeConcatList(tmpDir string, chunks []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if _, err := f.WriteString(fmt.Sprintf("file '%s'\n", abs)); err != nil {
+		if _, err := f.WriteString(fmt.Sprintf("file '%s'\n", escapeConcatPath(abs))); err != nil {
 			return "", err
 		}
 	}
 
 	return listFile, nil
+}
+
+func escapeConcatPath(path string) string {
+	escaped := make([]byte, 0, len(path))
+	for i := 0; i < len(path); i++ {
+		switch c := path[i]; c {
+		case '\\', '\'', '\n', '\r':
+			escaped = append(escaped, '\\', c)
+		default:
+			escaped = append(escaped, c)
+		}
+	}
+	return string(escaped)
 }
 
 func (c *Converter) convertFile(inPath, outPath string) error {

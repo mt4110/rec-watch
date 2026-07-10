@@ -24,11 +24,11 @@ type Entry struct {
 }
 
 func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Application Support", "RecWatch", "history.jsonl"), nil
+	return filepath.Join(dir, "RecWatch", "history.jsonl"), nil
 }
 
 func WriteConversionResult(result convert.ConvertResult) error {
