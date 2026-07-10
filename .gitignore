@@ -1,5 +1,4 @@
 # Build artifacts
-# Build artifacts
 rec-watch
 rec-watch.exe
 /build/
@@ -27,6 +26,7 @@ Thumbs.db
 # Editor directories and files
 .vscode/
 .idea/
+.codex/
 
 # Environment variables
 .env
