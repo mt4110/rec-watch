@@ -114,7 +114,7 @@ func CanMoveSource(result convert.ConvertResult) bool {
 	if err != nil || outputInfo.IsDir() || outputInfo.Size() <= 0 {
 		return false
 	}
-	return true
+	return outputInfo.Size() < inputInfo.Size()
 }
 
 func moveToTrash(ctx context.Context, path string) error {

@@ -49,6 +49,26 @@ func TestCanMoveSourceRequiresSmallerExistingOutput(t *testing.T) {
 
 	result.ConvertedSize = 5
 	result.SizeDiff = 5
+	if err := os.WriteFile(outputPath, []byte("01234567890"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if CanMoveSource(result) {
+		t.Fatal("expected currently larger output to be kept")
+	}
+
+	if err := os.WriteFile(outputPath, []byte("12345"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputPath, []byte("1234"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if CanMoveSource(result) {
+		t.Fatal("expected currently smaller input to be kept")
+	}
+
+	if err := os.WriteFile(inputPath, []byte("0123456789"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	result.OutputPath = filepath.Join(dir, "missing.mp4")
 	if CanMoveSource(result) {
 		t.Fatal("expected missing output to be kept")
