@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -18,8 +20,8 @@ import (
 	"github.com/mt4110/rec-watch/internal/history"
 	"github.com/mt4110/rec-watch/internal/logger"
 	"github.com/mt4110/rec-watch/internal/postprocess"
+	"github.com/mt4110/rec-watch/internal/preflight"
 	"github.com/mt4110/rec-watch/internal/prompt"
-	"github.com/mt4110/rec-watch/internal/updater"
 	"github.com/mt4110/rec-watch/internal/watcher"
 )
 
@@ -43,7 +45,6 @@ var rootCmd = &cobra.Command{
 
 		updateConfigFromFlags(cmd, cfg)
 		logger.Setup(cfg.LogFile)
-		updater.CheckFFmpeg()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -58,10 +59,14 @@ var rootCmd = &cobra.Command{
 			if len(cfg.WatchDirs) == 0 {
 				cfg.WatchDirs = []string{"."}
 			}
+			requireRuntime(preflight.Options{CheckOutputDir: true, WatchDirs: cfg.WatchDirs})
+
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
 
 			w := watcher.New(cfg, cvt)
 			log.Println("👀 監視モードを開始しました (Ctrl+C で終了)")
-			w.Run()
+			w.RunContext(ctx)
 			return
 		}
 
@@ -69,6 +74,7 @@ var rootCmd = &cobra.Command{
 		if len(inputPatterns) == 0 {
 			inputPatterns = []string{"."}
 		}
+		requireRuntime(preflight.Options{CheckOutputDir: true})
 
 		var files []string
 		videoExtensions := "{mov,MOV,m4v,mp4,avi,mkv}"
@@ -224,7 +230,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&flagNoPad, "no-pad", false, "1080pにリサイズする際に黒帯を追加しない")
 	rootCmd.Flags().BoolVar(&flagStampPerFile, "stamp-per-file", false, "個別のファイル名にタイムスタンプを追加する")
 	rootCmd.Flags().BoolVar(&flagNoTrash, "no-trash", false, "変換元のファイルをゴミ箱に移動しない")
-	rootCmd.Flags().StringVar(&flagSourcePolicy, "source-policy", "trash", "変換元ファイルの扱い (keep, trash, ask)")
+	rootCmd.Flags().StringVar(&flagSourcePolicy, "source-policy", "keep", "変換元ファイルの扱い (keep, trash, ask)")
 	rootCmd.Flags().BoolVar(&flagBatchStamp, "batch-stamp", true, "出力先ディレクトリをタイムスタンプ付きで作成する (default true)")
 	rootCmd.Flags().StringVar(&flagFFmpegBin, "ffmpeg-bin", "", "ffmpegのバイナリパスを明示的に指定する")
 	rootCmd.Flags().IntVar(&flagConcurrent, "concurrent", 0, "並列実行数")
@@ -288,8 +294,6 @@ func updateConfigFromFlags(cmd *cobra.Command, c *config.Config) {
 		c.NoTrash = flagNoTrash
 		if flagNoTrash {
 			c.SourcePolicy = "keep"
-		} else if !flags.Changed("source-policy") {
-			c.SourcePolicy = "trash"
 		}
 	}
 	if flags.Changed("source-policy") {
@@ -333,6 +337,12 @@ func updateConfigFromFlags(cmd *cobra.Command, c *config.Config) {
 	}
 	if err := config.ValidateSourcePolicy(c.SourcePolicy); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func requireRuntime(opt preflight.Options) {
+	if err := preflight.RequireRuntime(cfg, opt); err != nil {
+		log.Fatalf("❌ 実行前チェックに失敗しました:\n%v", err)
 	}
 }
 

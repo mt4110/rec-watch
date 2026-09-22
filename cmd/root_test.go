@@ -11,7 +11,7 @@ import (
 func TestUpdateConfigFromFlagsNoTrashForcesKeep(t *testing.T) {
 	command := &cobra.Command{}
 	command.Flags().Bool("no-trash", false, "")
-	command.Flags().String("source-policy", "trash", "")
+	command.Flags().String("source-policy", "keep", "")
 
 	if err := command.Flags().Set("no-trash", "true"); err != nil {
 		t.Fatal(err)
@@ -34,7 +34,7 @@ func TestUpdateConfigFromFlagsNoTrashForcesKeep(t *testing.T) {
 func TestUpdateConfigFromFlagsSourcePolicyOverridesLegacyNoTrashConfig(t *testing.T) {
 	command := &cobra.Command{}
 	command.Flags().Bool("no-trash", false, "")
-	command.Flags().String("source-policy", "trash", "")
+	command.Flags().String("source-policy", "keep", "")
 
 	if err := command.Flags().Set("source-policy", "ask"); err != nil {
 		t.Fatal(err)

@@ -14,8 +14,9 @@
 -   **スマートな変換**:
     -   アスペクト比を維持しつつ1080pにリサイズ＆黒帯追加（パディング）。
     -   変換元のファイルは `--source-policy` で `keep` / `trash` / `ask` から選択できます。
+    -   既定では元ファイルを残し、必要な場合だけ `--source-policy trash` / `ask` でゴミ箱移動を選べます。
     -   変換後ファイルが存在しない、0バイト、または元ファイルより大きい場合は、元ファイルをゴミ箱へ移動しません。
-    -   **ファイル名自動整理**: 録画日時（`YYYY-MM-DD_HH-MM-SS.mp4`）に自動リネーム。
+    -   **ファイル名自動整理**: 録画日時と元ファイル名（`YYYY-MM-DD_HH-MM-SS_name.mp4`）に自動リネームし、同名衝突を避けます。
 -   **安定化待ち**: 監視モードでは、作成直後のファイルにすぐ触らず、サイズと更新日時が連続して安定するまで待ってから変換します。
 -   **高速処理**: CPUコア数に応じた並列処理で、大量のファイルもサクサク変換。
 
@@ -24,16 +25,17 @@
 RecWatchは、ユーザーのプライバシーとセキュリティを第一に設計されています。
 
 -   **完全ローカル動作**: すべての処理はご自身のMac内（ローカル）で完結します。動画データやログが外部サーバーに送信されることは一切ありません。
--   **安全なファイル削除**: 変換後の元ファイルは「削除（rm）」ではなく「ゴミ箱への移動」を行います。万が一の場合でも、ゴミ箱から簡単に復元可能です。
+-   **安全な既定値**: 変換後も元ファイルを残す `--source-policy keep` が既定です。ゴミ箱への移動は明示的に選んだ場合だけ行います。
 -   **削除前の安全判定**: 変換が成功し、出力ファイルが存在し、変換後サイズが元ファイルより小さい場合だけ、元ファイルをゴミ箱へ移動できます。
 -   **オープンソース**: ソースコードは全て公開されており、不審な挙動がないことを誰でも確認できます。
 
 ## インストール
 
 ### 1. FFmpegのインストール
-このツールは内部で `ffmpeg` を使用します。
+このツールは動画変換に `ffmpeg` を必須とします。RecWatchはFFmpegを自動更新しないため、Homebrewなどで管理してください。
 ```bash
 brew install ffmpeg
+brew upgrade ffmpeg
 ```
 
 ### 2. terminal-notifierのインストール (推奨)
@@ -47,11 +49,13 @@ Go環境がある場合:
 ```bash
 go install github.com/mt4110/rec-watch@latest
 ```
-または、リポジトリをクローンしてビルド:
+または、リポジトリをクローンしてビルドします。開発時のGoは `mise.toml` で `1.26.5` に固定しています。
 ```bash
 git clone https://github.com/mt4110/rec-watch.git
 cd rec-watch
-go build -o rec-watch main.go
+mise install
+mise exec -- go test ./...
+mise exec -- go build -o rec-watch main.go
 sudo mv rec-watch /usr/local/bin/
 ```
 
@@ -76,10 +80,10 @@ rec-watch --watch ~/Desktop/ScreenRecordings \
 
 ### 変換元ファイルの扱い
 
-デフォルトは `--source-policy trash` です。ただし、変換後ファイルが0バイト、元ファイル以上のサイズ、または存在しない場合は、元ファイルを残します。
+デフォルトは `--source-policy keep` です。`trash` または `ask` を選んだ場合でも、変換後ファイルが0バイト、元ファイル以上のサイズ、または存在しない場合は、元ファイルを残します。
 
 ```bash
-# 元ファイルを必ず残す
+# 元ファイルを必ず残す (default)
 rec-watch ~/Movies/ScreenRecordings --source-policy keep
 
 # 安全条件を満たした場合だけゴミ箱へ移動
@@ -133,45 +137,40 @@ Flags:
 
 変換履歴は成功時にOS標準の設定ディレクトリ配下の `RecWatch/history.jsonl` へJSONL形式で保存されます。`rec-watch stats` はこの履歴と従来のログを両方集計します。
 
+### 実行前チェック
+
+通常変換、監視モード、TUI、LaunchAgentの `install` では、開始前に最低限の実行条件を確認します。FFmpegが見つからない、FFmpegを実行できない、出力先に書き込めない、監視対象ディレクトリが存在しない場合は、変換や常駐化を開始しません。
+
+```bash
+rec-watch doctor
+```
+
+`doctor` は詳細診断用です。FFmpeg、通知、ログ、LaunchAgent状態をまとめて確認できます。
+
 ---
 
 ## 自動実行（常駐化） on macOS
 
-PC起動時に自動で `RecWatch` を立ち上げる設定です。
+PC起動時に自動で `RecWatch` を立ち上げるには、インストール済みの `rec-watch` バイナリからLaunchAgentを登録します。`go run . install` のような一時バイナリは登録しません。
 
-1.  **plistファイルの作成**
-    `~/Library/LaunchAgents/com.user.recwatch.plist` を作成します。
-    (`YOUR_USERNAME` はご自身のユーザー名に書き換えてください)
+```bash
+rec-watch install --watch ~/Desktop/ScreenRecordings --dest ~/Desktop/ScreenRecordings-out
+rec-watch status
+```
 
-    ```xml
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-        <key>Label</key>
-        <string>com.user.recwatch</string>
-        <key>ProgramArguments</key>
-        <array>
-            <string>/usr/local/bin/rec-watch</string>
-            <string>--watch</string>
-            <string>/Users/YOUR_USERNAME/Desktop/ScreenRecordings</string>
-        </array>
-        <key>RunAtLoad</key>
-        <true/>
-        <key>KeepAlive</key>
-        <true/>
-        <key>StandardOutPath</key>
-        <string>/Users/YOUR_USERNAME/Library/Logs/rec-watch.log</string>
-        <key>StandardErrorPath</key>
-        <string>/Users/YOUR_USERNAME/Library/Logs/rec-watch.log</string>
-    </dict>
-    </plist>
-    ```
+`install` は `~/Library/LaunchAgents/com.user.recwatch.plist` を生成し、`launchctl bootstrap` と `launchctl kickstart` で登録・起動します。plistには監視対象、出力先、作業ディレクトリ、ログ出力先が明示されます。
 
-2.  **有効化**
-    ```bash
-    launchctl load ~/Library/LaunchAgents/com.user.recwatch.plist
-    ```
+```bash
+rec-watch start
+rec-watch stop
+rec-watch uninstall
+```
+
+手元でビルドしたバイナリを登録する場合は、絶対パスを指定できます。
+
+```bash
+rec-watch install --bin /usr/local/bin/rec-watch --watch ~/Desktop/ScreenRecordings --dest ~/Desktop/ScreenRecordings-out
+```
 
 ## トラブルシューティング
 
@@ -202,4 +201,3 @@ TUIモードの操作方法や、GPU/並列変換モードの詳しい仕様に�
 
 ## 関連、親和性があるリポジトリ
  [readme-gif-crafter](https://github.com/mt4110#:~:text=1-,readme%2Dgif%2Dcrafter,-Public)
-

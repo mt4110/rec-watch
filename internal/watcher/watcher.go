@@ -35,6 +35,13 @@ func New(cfg *config.Config, cvt *convert.Converter) *Watcher {
 }
 
 func (w *Watcher) Run() {
+	w.RunContext(context.Background())
+}
+
+func (w *Watcher) RunContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
@@ -45,20 +52,21 @@ func (w *Watcher) Run() {
 		log.Fatal("監視対象のディレクトリが設定されていません")
 	}
 
-	done := make(chan bool)
-
 	// 重複処理防止用のマップ
 	var processingMu sync.Mutex
 	processing := make(map[string]bool)
+	var workers sync.WaitGroup
 
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case event, ok := <-watcher.Events:
 				if !ok {
 					return
 				}
-				w.handleEvent(event, &processingMu, processing)
+				w.handleEvent(ctx, event, &processingMu, processing, &workers)
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -81,10 +89,13 @@ func (w *Watcher) Run() {
 		}
 	}
 
-	<-done
+	<-ctx.Done()
+	log.Println("監視を終了しています。処理中の変換があれば完了を待ちます...")
+	workers.Wait()
+	log.Println("監視モードを終了しました")
 }
 
-func (w *Watcher) handleEvent(event fsnotify.Event, processingMu *sync.Mutex, processing map[string]bool) {
+func (w *Watcher) handleEvent(ctx context.Context, event fsnotify.Event, processingMu *sync.Mutex, processing map[string]bool, workers *sync.WaitGroup) {
 	if event.Op&fsnotify.Create != fsnotify.Create && event.Op&fsnotify.Rename != fsnotify.Rename {
 		return
 	}
@@ -120,7 +131,11 @@ func (w *Watcher) handleEvent(event fsnotify.Event, processingMu *sync.Mutex, pr
 		w.EventChan <- FileFoundEvent{Path: event.Name, Name: fName}
 	}
 
-	go w.processFile(event.Name, fName, processingMu, processing)
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		w.processFile(ctx, event.Name, fName, processingMu, processing)
+	}()
 }
 
 // Events
@@ -179,7 +194,7 @@ func (w *Watcher) shouldProcess(fName string) bool {
 	return true
 }
 
-func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, processing map[string]bool) {
+func (w *Watcher) processFile(ctx context.Context, path, name string, processingMu *sync.Mutex, processing map[string]bool) {
 	defer func() {
 		processingMu.Lock()
 		delete(processing, path)
@@ -207,7 +222,11 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 	}
 
 	log.Printf("変換開始: %s", absPath)
-	if err := w.waitForStableFile(absPath); err != nil {
+	if err := w.waitForStableFile(ctx, absPath); err != nil {
+		if errors.Is(err, context.Canceled) {
+			log.Printf("終了要求により処理を中断しました: %s", absPath)
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			log.Printf("安定化待ち中に監視対象が消えたためスキップ: %s", absPath)
 			return
@@ -233,7 +252,7 @@ func (w *Watcher) processFile(path, name string, processingMu *sync.Mutex, proce
 			if err := history.WriteConversionResult(result); err != nil {
 				log.Printf("履歴の書き込みに失敗: %v", err)
 			}
-			decision, err := postprocess.HandleSource(context.Background(), postprocess.SourcePolicy(w.Cfg.SourcePolicy), result, prompt.NewSourcePrompter())
+			decision, err := postprocess.HandleSource(ctx, postprocess.SourcePolicy(w.Cfg.SourcePolicy), result, prompt.NewSourcePrompter())
 			if err != nil {
 				log.Printf("変換元ファイルの処理に失敗: %v", err)
 			} else {
@@ -262,8 +281,8 @@ func (w *Watcher) prepareBatchDir() (string, error) {
 	return batchDir, nil
 }
 
-func (w *Watcher) waitForStableFile(path string) error {
-	_, err := fileguard.WaitUntilStable(context.Background(), path, fileguard.StabilityOptions{
+func (w *Watcher) waitForStableFile(ctx context.Context, path string) error {
+	_, err := fileguard.WaitUntilStable(ctx, path, fileguard.StabilityOptions{
 		Timeout:       w.Cfg.StableTimeout,
 		Interval:      w.Cfg.StableInterval,
 		StableSamples: w.Cfg.StableSamples,

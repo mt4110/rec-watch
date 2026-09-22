@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,12 +110,28 @@ func (c *Converter) ConvertOne(inPath string, outDir string) (ConvertResult, err
 	log.Printf("▶ 変換: %s -> %s", inPath, outPath)
 	startTime := time.Now()
 
-	if err := c.convertFile(inPath, outPath); err != nil {
+	finalOutPath := outPath
+	convertOutPath := outPath
+	if !c.Cfg.DryRun {
+		tmp, err := tempOutputPath(outDir, finalOutPath)
+		if err != nil {
+			return ConvertResult{}, err
+		}
+		convertOutPath = tmp
+		defer os.Remove(tmp)
+	}
+
+	if err := c.convertFile(inPath, convertOutPath); err != nil {
 		return ConvertResult{}, err
+	}
+	if !c.Cfg.DryRun {
+		if err := finalizeOutput(convertOutPath, finalOutPath); err != nil {
+			return ConvertResult{}, err
+		}
 	}
 
 	finishedAt := time.Now()
-	result := makeConvertResult(inPath, outPath, startTime, finishedAt)
+	result := makeConvertResult(inPath, finalOutPath, startTime, finishedAt)
 	if !c.Cfg.DryRun && result.ConvertedSize <= 0 {
 		return ConvertResult{}, fmt.Errorf("converted output is empty: %s", outPath)
 	}
@@ -127,7 +144,11 @@ func outputPathForInput(inPath, outDir string) (string, error) {
 		return "", err
 	}
 	timeStamp := info.ModTime().Format("2006-01-02_15-04-05")
-	return filepath.Join(outDir, fmt.Sprintf("%s.mp4", timeStamp)), nil
+	stem := sanitizeFileStem(strings.TrimSuffix(filepath.Base(inPath), filepath.Ext(inPath)))
+	if stem == "" {
+		stem = "recording"
+	}
+	return uniqueOutputPath(outDir, fmt.Sprintf("%s_%s", timeStamp, stem), ".mp4")
 }
 
 func makeConvertResult(inPath, outPath string, startedAt, finishedAt time.Time) ConvertResult {
@@ -166,7 +187,14 @@ func (c *Converter) ConvertSplit(inPath string, outDir string) (ConvertResult, e
 	}
 	startTime := time.Now()
 	timeStamp := info.ModTime().Format("2006-01-02_15-04-05")
-	finalOutPath := filepath.Join(outDir, fmt.Sprintf("%s.mp4", timeStamp))
+	stem := sanitizeFileStem(strings.TrimSuffix(filepath.Base(inPath), filepath.Ext(inPath)))
+	if stem == "" {
+		stem = "recording"
+	}
+	finalOutPath, err := uniqueOutputPath(outDir, fmt.Sprintf("%s_%s", timeStamp, stem), ".mp4")
+	if err != nil {
+		return ConvertResult{}, err
+	}
 
 	if c.Cfg.DryRun {
 		log.Printf("[DryRun] Would split %s into chunks...", inPath)
@@ -246,18 +274,28 @@ func (c *Converter) ConvertSplit(inPath string, outDir string) (ConvertResult, e
 
 	log.Println("🔗 チャンクを結合中...")
 
+	tmpOutPath, err := tempOutputPath(outDir, finalOutPath)
+	if err != nil {
+		return ConvertResult{}, err
+	}
+	defer os.Remove(tmpOutPath)
+
 	mergeArgs := []string{
+		"-n",
 		"-f", "concat",
 		"-safe", "0",
 		"-i", listFile,
 		"-c", "copy",
-		finalOutPath,
+		tmpOutPath,
 	}
 
 	cmd := exec.Command(c.ffmpegPath(), mergeArgs...)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return ConvertResult{}, fmt.Errorf("merge failed: %v\n%s", err, string(out))
+	}
+	if err := finalizeOutput(tmpOutPath, finalOutPath); err != nil {
+		return ConvertResult{}, err
 	}
 
 	finishedAt := time.Now()
@@ -338,6 +376,7 @@ func (c *Converter) ffmpegArgs(inPath, outPath string) []string {
 	}
 
 	args := []string{
+		"-n",
 		"-i", inPath,
 	}
 
@@ -373,4 +412,72 @@ func (c *Converter) ffmpegArgs(inPath, outPath string) []string {
 	}
 
 	return append(args, outPath)
+}
+
+func uniqueOutputPath(outDir, stem, ext string) (string, error) {
+	for i := 0; i < 1000; i++ {
+		name := stem + ext
+		if i > 0 {
+			name = fmt.Sprintf("%s-%03d%s", stem, i, ext)
+		}
+		path := filepath.Join(outDir, name)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		} else {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("could not allocate unique output path for %s%s", stem, ext)
+}
+
+func tempOutputPath(outDir, finalOutPath string) (string, error) {
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", err
+	}
+	pattern := "." + strings.TrimSuffix(filepath.Base(finalOutPath), filepath.Ext(finalOutPath)) + "-*.tmp.mp4"
+	f, err := os.CreateTemp(outDir, pattern)
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func finalizeOutput(tmpPath, finalPath string) error {
+	if _, err := os.Stat(finalPath); err == nil {
+		return fmt.Errorf("refusing to overwrite existing output: %s", finalPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		return fmt.Errorf("rename converted output: %w", err)
+	}
+	return nil
+}
+
+func sanitizeFileStem(stem string) string {
+	stem = strings.TrimSpace(stem)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range stem {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-_")
 }
