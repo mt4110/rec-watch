@@ -59,7 +59,7 @@ func NewDefault() *Config {
 		BatchStamp:     true,
 		Concurrent:     defaultConcurrent,
 		Notify:         true,
-		SourcePolicy:   "trash",
+		SourcePolicy:   "keep",
 		StableTimeout:  120 * time.Second,
 		StableInterval: time.Second,
 		StableSamples:  3,

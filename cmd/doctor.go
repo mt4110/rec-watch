@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/mt4110/rec-watch/internal/launchagent"
 	"github.com/spf13/cobra"
 )
 
@@ -65,22 +66,16 @@ var doctorCmd = &cobra.Command{
 		}
 
 		// 4. Plist check
-		plistPath := filepath.Join(home, "Library/LaunchAgents/com.user.recwatch.plist")
-		if _, err := os.Stat(plistPath); err != nil {
-			log.Println("ℹ️ LaunchAgent設定 (plist) は見つかりませんでした (init未実行)")
+		paths := launchagent.DefaultPaths(home)
+		if _, err := os.Stat(paths.PlistPath); err != nil {
+			log.Println("ℹ️ LaunchAgent設定 (plist) は見つかりませんでした (install未実行)")
 		} else {
-			log.Printf("✅ plist found: %s", plistPath)
-			// Check if loaded
-			cmd := exec.Command("launchctl", "list")
-			out, _ := cmd.Output()
-			if err == nil {
-				// grep com.user.recwatch
-				// Simple string search
-				if contains(out, []byte("com.user.recwatch")) {
-					log.Println("✅ LaunchAgent is loaded (launchctl list confirms)")
-				} else {
-					log.Println("⚠️ plistはありますが、ロードされていません (`launchctl load` が必要かもしれません)")
-				}
+			log.Printf("✅ plist found: %s", paths.PlistPath)
+			if out, err := launchagent.RunLaunchctl(launchagent.PrintArgs(os.Getuid())); err == nil {
+				log.Println("✅ LaunchAgent is registered (launchctl print confirms)")
+				_ = out
+			} else {
+				log.Println("⚠️ plistはありますが、登録されていません (`rec-watch install` が必要かもしれません)")
 			}
 		}
 
@@ -91,22 +86,6 @@ var doctorCmd = &cobra.Command{
 			log.Println("\n✅ 診断完了: 概ね問題なさそうです！")
 		}
 	},
-}
-
-func contains(b []byte, sub []byte) bool {
-	for i := 0; i < len(b)-len(sub)+1; i++ {
-		match := true
-		for j := 0; j < len(sub); j++ {
-			if b[i+j] != sub[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
 }
 
 func init() {

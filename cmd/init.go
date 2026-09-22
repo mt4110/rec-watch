@@ -4,112 +4,93 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"text/template"
 
+	"github.com/mt4110/rec-watch/internal/launchagent"
+	"github.com/mt4110/rec-watch/internal/preflight"
 	"github.com/spf13/cobra"
 )
 
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "初期セットアップを行います",
-	Long:  `必要なディレクトリ(~/Desktop/ScreenRecordings)の作成と、LaunchAgent(plist)の生成・登録を行います。`,
+var (
+	installWatchDir string
+	installDestDir  string
+	installBinPath  string
+)
+
+var installCmd = &cobra.Command{
+	Use:   "install",
+	Short: "LaunchAgentを生成して登録します",
+	Long:  `録画監視用のLaunchAgent(plist)を生成し、launchctl bootstrap/kickstartで登録します。`,
 	Run: func(cmd *cobra.Command, args []string) {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			log.Fatalf("ホームディレクトリの取得に失敗: %v", err)
 		}
-
-		// 1. Create Directory
-		targetDir := filepath.Join(home, "Desktop", "ScreenRecordings")
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			log.Printf("ディレクトリ作成失敗: %v", err)
-		} else {
-			log.Printf("✅ ディレクトリを確認: %s", targetDir)
-		}
-
-		// 2. Generate plist
-		username := os.Getenv("USER")
-		if username == "" {
-			username = filepath.Base(home)
-		}
-
-		// Find executable path
 		execPath, err := os.Executable()
 		if err != nil {
-			execPath = "/usr/local/bin/rec-watch" // fallback
+			log.Fatalf("実行ファイルパスの取得に失敗: %v", err)
 		}
 
-		plistPath := filepath.Join(home, "Library/LaunchAgents/com.user.recwatch.plist")
-
-		tmpl := `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.user.recwatch</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{{.ExecPath}}</string>
-        <string>--watch</string>
-        <string>{{.WatchDir}}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>{{.LogPath}}</string>
-    <key>StandardErrorPath</key>
-    <string>{{.LogPath}}</string>
-</dict>
-</plist>
-`
-		data := struct {
-			ExecPath string
-			WatchDir string
-			LogPath  string
-		}{
-			ExecPath: execPath,
-			WatchDir: targetDir,
-			LogPath:  filepath.Join(home, "Library/Logs/rec-watch.log"),
-		}
-
-		f, err := os.Create(plistPath)
+		paths := launchagent.DefaultPaths(home)
+		data, err := launchagent.ResolveInstallOptions(launchagent.InstallOptions{
+			HomeDir:    home,
+			BinaryPath: installBinPath,
+			WatchDir:   installWatchDir,
+			DestDir:    installDestDir,
+		}, execPath)
 		if err != nil {
-			log.Fatalf("plistファイルの作成に失敗: %v", err)
+			log.Fatal(err)
 		}
-
-		t := template.Must(template.New("plist").Parse(tmpl))
-		if err := t.Execute(f, data); err != nil {
-			f.Close()
-			log.Fatalf("plistの書き込みに失敗: %v", err)
+		if err := launchagent.EnsureInstallDirs(data, paths); err != nil {
+			log.Fatal(err)
 		}
-		f.Close()
-		log.Printf("✅ plistファイルを作成: %s", plistPath)
-
-		// 3. Launchctl load
-		log.Println("LaunchAgentをロードしますか？ (y/n)")
-		var response string
-		fmt.Scanln(&response)
-		if response == "y" || response == "Y" {
-			// Unload first just in case
-			exec.Command("launchctl", "unload", plistPath).Run()
-
-			cmd := exec.Command("launchctl", "load", plistPath)
-			if output, err := cmd.CombinedOutput(); err != nil {
-				log.Printf("❌ launchctl load 失敗: %v\n%s", err, string(output))
-			} else {
-				log.Println("✅ launchctl load 成功！ rec-watchがバックグラウンドで起動しました。")
-			}
-		} else {
-			log.Println("スキップしました。手動で実行する場合は以下のコマンドを入力してください:")
-			fmt.Printf("launchctl load %s\n", plistPath)
+		runtimeCfg := *cfg
+		runtimeCfg.DestDir = data.DestDir
+		runtimeCfg.SourcePolicy = "keep"
+		if err := preflight.RequireRuntime(&runtimeCfg, preflight.Options{
+			CheckOutputDir: true,
+			WatchDirs:      []string{data.WatchDir},
+		}); err != nil {
+			log.Fatalf("❌ LaunchAgent登録前の実行前チェックに失敗しました:\n%v", err)
 		}
+		if err := launchagent.WritePlist(paths.PlistPath, data); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("✅ plistファイルを作成: %s", paths.PlistPath)
+		log.Printf("監視対象: %s", data.WatchDir)
+		log.Printf("出力先: %s", data.DestDir)
+
+		uid := os.Getuid()
+		if output, err := launchagent.RunLaunchctl(launchagent.BootoutArgs(uid)); err != nil {
+			log.Printf("ℹ️ 既存LaunchAgentの停止はスキップしました: %v\n%s", err, string(output))
+		}
+		if output, err := launchagent.RunLaunchctl(launchagent.BootstrapArgs(uid, paths.PlistPath)); err != nil {
+			log.Fatalf("❌ launchctl bootstrap 失敗: %v\n%s", err, string(output))
+		}
+		if output, err := launchagent.RunLaunchctl(launchagent.KickstartArgs(uid)); err != nil {
+			log.Fatalf("❌ launchctl kickstart 失敗: %v\n%s", err, string(output))
+		}
+		log.Println("✅ LaunchAgentを登録して起動しました")
+	},
+}
+
+var initCmd = &cobra.Command{
+	Use:    "init",
+	Short:  "初期セットアップを行います",
+	Long:   `installの後方互換エイリアスです。LaunchAgent(plist)の生成・登録を行います。`,
+	Hidden: true,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Fprintln(os.Stderr, "`rec-watch init` は非推奨です。`rec-watch install` を実行します。")
+		installCmd.Run(cmd, args)
 	},
 }
 
 func init() {
+	installCmd.Flags().StringVar(&installWatchDir, "watch", "", "監視対象ディレクトリ")
+	installCmd.Flags().StringVar(&installDestDir, "dest", "", "変換後ファイルの出力先ディレクトリ")
+	installCmd.Flags().StringVar(&installBinPath, "bin", "", "LaunchAgentに登録するrec-watchバイナリの絶対パス")
+	initCmd.Flags().StringVar(&installWatchDir, "watch", "", "監視対象ディレクトリ")
+	initCmd.Flags().StringVar(&installDestDir, "dest", "", "変換後ファイルの出力先ディレクトリ")
+	initCmd.Flags().StringVar(&installBinPath, "bin", "", "LaunchAgentに登録するrec-watchバイナリの絶対パス")
+	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(initCmd)
 }

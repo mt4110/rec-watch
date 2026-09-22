@@ -10,6 +10,7 @@ import (
 	"github.com/mt4110/rec-watch/internal/config"
 	"github.com/mt4110/rec-watch/internal/convert"
 	"github.com/mt4110/rec-watch/internal/logger"
+	"github.com/mt4110/rec-watch/internal/preflight"
 	"github.com/mt4110/rec-watch/internal/tui"
 	"github.com/mt4110/rec-watch/internal/watcher"
 )
@@ -36,6 +37,7 @@ var tuiCmd = &cobra.Command{
 		if len(cfg.WatchDirs) == 0 {
 			cfg.WatchDirs = []string{"."}
 		}
+		requireRuntime(preflight.Options{CheckOutputDir: true, WatchDirs: cfg.WatchDirs})
 
 		// Dependencies
 		cvt := convert.New(cfg)
