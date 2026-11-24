@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+if git diff --cached --quiet --no-ext-diff -- go.mod go.sum; then
+    exit 0
+else
+    diff_status=$?
+    [ "$diff_status" -eq 1 ] || exit "$diff_status"
+fi
+
+if ! command -v osv-scanner >/dev/null 2>&1; then
+    echo 'OSV-Scanner is required for Go dependency changes. Run: brew install osv-scanner' >&2
+    exit 1
+fi
+
+snapshot=$(mktemp -d "${TMPDIR:-/tmp}/rec-watch-osv.XXXXXXXX")
+trap 'if [ -f "$snapshot/go.mod" ]; then unlink "$snapshot/go.mod"; fi; rmdir "$snapshot"' EXIT
+trap 'exit 1' HUP INT TERM
+
+# Scan the manifest being committed, including for go.sum-only changes.
+git show :go.mod > "$snapshot/go.mod"
+
+if osv-scanner scan source --offline --no-resolve --no-call-analysis=go --lockfile="$snapshot/go.mod"; then
+    exit 0
+else
+    scan_status=$?
+fi
+echo 'OSV scan failed. Review the findings or refresh the offline database (see README).' >&2
+exit "$scan_status"

@@ -3,20 +3,61 @@ name: CI
 on:
   pull_request:
   push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
 
 jobs:
+  osv:
+    name: OSV dependency scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install OSV-Scanner
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            --output osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64
+          echo 'fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  osv-scanner' | sha256sum --check
+          chmod +x osv-scanner
+      - name: Scan Go dependencies
+        run: |
+          "$RUNNER_TEMP/osv-scanner" scan source --offline --no-resolve \
+            --no-call-analysis=go --download-offline-databases --lockfile=go.mod
+
   test:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
         with:
-          go-version-file: go.mod
+          persist-credentials: false
+      - name: Read pinned Go version
+        id: go
+        shell: bash
+        run: |
+          version=$(awk -F '"' '/^go = "/ { print $2 }' mise.toml)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+          cache-dependency-path: go.sum
       - name: Install FFmpeg
-        run: brew install ffmpeg
+        run: |
+          brew install ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: Test
-        run: go test ./...
+        run: go test -mod=readonly -count=1 ./...
       - name: Vet
-        run: go vet ./...
+        run: go vet -mod=readonly ./...
       - name: Build
-        run: go build ./...
+        run: go build -mod=readonly ./...
