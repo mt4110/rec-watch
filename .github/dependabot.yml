@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    assignees: [mt4110]
+    allow:
+      - dependency-type: all
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+    groups:
+      go-module-updates:
+        patterns: ["*"]
+        update-types: [minor, patch]

@@ -49,7 +49,7 @@ Go環境がある場合:
 ```bash
 go install github.com/mt4110/rec-watch@latest
 ```
-または、リポジトリをクローンしてビルドします。開発時のGoは `mise.toml` で `1.26.5` に固定しています。
+または、リポジトリをクローンしてビルドします。ローカル開発とCIでは `mise.toml` に固定したGoを使います。
 ```bash
 git clone https://github.com/mt4110/rec-watch.git
 cd rec-watch
@@ -198,6 +198,24 @@ rec-watch install --bin /usr/local/bin/rec-watch --watch ~/Desktop/ScreenRecordi
 TUIモードの操作方法や、GPU/並列変換モードの詳しい仕様については、以下のドキュメントを参照してください。
 
 👉 [詳細マニュアル (docs/USAGE.md)](./docs/USAGE.md)
+
+## 依存の更新
+
+Dependabot は Go モジュールのパッチ・マイナー更新を週次でまとめてPRにします。Go本体は `mise.toml` の固定値を変更するPRで更新します。PRと `main` への反映後に、macOSでテスト（FFmpegを使う実動画E2Eを含む）、`go vet`、ビルドを実行します。
+
+同じタイミングで、Dependabot のPRも含めて OSV-Scanner が `go.mod` の依存を検査します。CI は実行時にOSVデータベースを取得し、検出時はチェックを失敗させます。
+
+### ローカルのコミット前検査
+
+このリポジトリで Git フックを有効にします。既存の `core.hooksPath` に有効なフックがある場合は、上書きする前に構成を確認してください。
+
+```sh
+brew install osv-scanner
+osv-scanner scan source --offline --no-resolve --no-call-analysis=go --download-offline-databases --lockfile=go.mod
+git config --local core.hooksPath .githooks
+```
+
+データベースの初回取得と更新には、上の `--download-offline-databases` コマンドを使います。これは取得後に検査も実行するため、脆弱性があれば報告します。フックは `go.mod` または `go.sum` にステージ済みの差分があるとき、コミット対象の `go.mod` に記載された依存をオフラインで検査します。脆弱性を検出した場合や、スキャナー・データベースがなく検査できない場合はコミットを止めます。
 
 ## 関連、親和性があるリポジトリ
  [readme-gif-crafter](https://github.com/mt4110#:~:text=1-,readme%2Dgif%2Dcrafter,-Public)
